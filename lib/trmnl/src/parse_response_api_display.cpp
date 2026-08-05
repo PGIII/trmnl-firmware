@@ -26,7 +26,8 @@ ApiDisplayResponse parseResponse_apiDisplay(String &payload) {
         .reset_firmware = false,
         .special_function = SF_NONE,
         .action = "",
-        .touchbar_mode = ""};
+        .touchbar_mode = "",
+        .prefetch = false};
   }
   String special_function_str = doc["special_function"];
   // Convert the temperature profile ("default", "a", "b", "c")
@@ -55,5 +56,7 @@ ApiDisplayResponse parseResponse_apiDisplay(String &payload) {
       .reset_firmware = doc["reset_firmware"],
       .special_function = parseSpecialFunction(special_function_str),
       .action = doc["action"] | "",
-      .touchbar_mode = doc["touchbar_mode"] | ""};
+      .touchbar_mode = doc["touchbar_mode"] | "",
+      // server doesn't return this flag unless the caller opted into prefetching
+      .prefetch = doc["prefetch"] | false};
 }

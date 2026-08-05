@@ -1592,6 +1592,33 @@ void load_prev_image(void)
   }
 } /* load_prev_image() */
 
+// Registers a downloaded image in the playlist browse order without showing
+// it on screen or touching the "currently displayed" bookkeeping (curr/last
+// path, browse path, DisplayedImage). Used when the server sets
+// `prefetch: true` to warm the local cache ahead of time.
+//
+// The playlist/browse cache is a TRMNL-X-only feature (touchbar gestures,
+// `update_playlist_order`), so on other boards this is a no-op beyond the
+// download itself: "download without displaying" is still meaningful there,
+// even though there's no local cache to insert into.
+//
+// A run of consecutive prefetches must land in the order the server sent
+// them: each call anchors on the *previously prefetched* path rather than the
+// still-displayed image, so update_playlist_order() appends every new entry
+// after the last one instead of repeatedly inserting after the same,
+// unchanged anchor (which would reverse the order).
+static void prefetch_into_playlist(const char *new_path) {
+#ifdef BOARD_TRMNL_X
+  String anchor = preferences.getString(
+      PREFERENCES_PREFETCH_PATH_KEY,
+      preferences.getString(PREFERENCES_CURRENT_PATH_KEY, ""));
+  update_playlist_order(new_path, anchor.c_str());
+  preferences.putString(PREFERENCES_PREFETCH_PATH_KEY, String(new_path));
+#else
+  (void)new_path;
+#endif
+}
+
 /**
  * @brief Function to ping server and download and show the image if all is OK
  * @param url Server URL address
@@ -1647,12 +1674,20 @@ static https_request_err_e downloadAndShow()
 
   if (!status && result == HTTPS_SUCCESS) { // this means we already have this image stored in SPIFFS
       char szTemp[36];
+      filesystem_fix_filename(apiDisplayResult.response.filename.c_str(), szTemp);
+      if (apiDisplayResult.response.prefetch) {
+        // Silent prefetch: the image is already on flash, so just give it a
+        // place in the browse order without touching the screen or the
+        // "currently displayed" bookkeeping.
+        prefetch_into_playlist(szTemp);
+        buffer = nullptr;
+        return result;
+      }
 #if BOARD_X_CLASS && !defined(BOARD_SEEED_RETERMINAL_E1003)
       if (DisplayedImage::exists()) {
         load_prev_image(); // decode the older image into the previous buffer of FastEPD
       }
 #endif
-      filesystem_fix_filename(apiDisplayResult.response.filename.c_str(), szTemp);
       if (DisplayedImage::matches(szTemp)) {
         // We just displayed the same image, don't refresh the display
         Log.info("%s [%d]: The image hasn't changed since the last wakeup, don't refresh the display.\r\n", __FILE__, __LINE__);
@@ -1680,6 +1715,7 @@ static https_request_err_e downloadAndShow()
       preferences.putString(PREFERENCES_CURRENT_PATH_KEY, String(szTemp));
       #ifdef BOARD_TRMNL_X
       update_playlist_order(szTemp, _curPath.c_str());
+      preferences.remove(PREFERENCES_PREFETCH_PATH_KEY);
       #endif
       preferences.putString(PREFERENCES_BROWSE_PATH_KEY, String(szTemp));
       return result;
@@ -1691,15 +1727,20 @@ static https_request_err_e downloadAndShow()
   {
     Log_info("Downloading image via modem (5 GHz path)");
 
+    bool prefetch = apiDisplayResult.response.prefetch;
+
     char szTemp[36];
     filesystem_fix_filename(apiDisplayResult.response.filename.c_str(), szTemp);
     Log_info("Modem: saving to %s", szTemp);
     filesystem_purge_old_file(szTemp);
 
     String _prevPath = preferences.getString(PREFERENCES_CURRENT_PATH_KEY, "");
-    String _prevLastPath = preferences.getString(PREFERENCES_LAST_PATH_KEY, "");
-    if (!_prevPath.isEmpty() && (_prevPath != String(szTemp) || _prevLastPath.isEmpty()))
-      preferences.putString(PREFERENCES_LAST_PATH_KEY, _prevPath);
+    if (!prefetch)
+    {
+      String _prevLastPath = preferences.getString(PREFERENCES_LAST_PATH_KEY, "");
+      if (!_prevPath.isEmpty() && (_prevPath != String(szTemp) || _prevLastPath.isEmpty()))
+        preferences.putString(PREFERENCES_LAST_PATH_KEY, _prevPath);
+    }
 
     // Include ID and Access Token if the image is hosted on the same server as the API
     String imgHeaders;
@@ -1722,13 +1763,25 @@ static https_request_err_e downloadAndShow()
       return HTTPS_WRONG_IMAGE_SIZE;
     }
 
-    display_show_image(buf, fileSize, true);
-    free(buf);
-    DisplayedImage::remember(szTemp); // current image becomes the previous image
+    if (prefetch)
+    {
+      // Silent prefetch: keep the download and its place in the browse
+      // order, but leave the screen and "currently displayed" bookkeeping
+      // untouched.
+      free(buf);
+      prefetch_into_playlist(szTemp);
+    }
+    else
+    {
+      display_show_image(buf, fileSize, true);
+      free(buf);
+      DisplayedImage::remember(szTemp); // current image becomes the previous image
 
-    preferences.putString(PREFERENCES_CURRENT_PATH_KEY, String(szTemp));
-    update_playlist_order(szTemp, _prevPath.c_str());
-    preferences.putString(PREFERENCES_BROWSE_PATH_KEY, String(szTemp));
+      preferences.putString(PREFERENCES_CURRENT_PATH_KEY, String(szTemp));
+      update_playlist_order(szTemp, _prevPath.c_str());
+      preferences.remove(PREFERENCES_PREFETCH_PATH_KEY);
+      preferences.putString(PREFERENCES_BROWSE_PATH_KEY, String(szTemp));
+    }
 
 //    new_filename = apiDisplayResult.response.filename;
 //    saveCurrentFileName(new_filename);
@@ -1930,24 +1983,33 @@ static https_request_err_e downloadAndShow()
             Log.info("%s [%d]: Writing %s to SPIFFS\r\n", __FILE__, __LINE__, szTemp);
             filesystem_purge_old_file(szTemp); // try to delete the old version or older than 24h
             writeImageToFile(szTemp, buffer, content_size);
-            Log.info("%s [%d]: Decoding %s\r\n", __FILE__, __LINE__, (isPNG) ? "png" : "jpeg");
-            display_show_image(buffer, content_size, true);
-            DisplayedImage::remember(szTemp); // current image becomes the previous image
+            if (apiDisplayResult.response.prefetch) {
+              // Silent prefetch: keep the download and its place in the
+              // browse order, but don't put it on screen or claim it as the
+              // "currently displayed" image.
+              Log.info("%s [%d]: Prefetched %s without displaying it\r\n", __FILE__, __LINE__, szTemp);
+              prefetch_into_playlist(szTemp);
+            } else {
+              Log.info("%s [%d]: Decoding %s\r\n", __FILE__, __LINE__, (isPNG) ? "png" : "jpeg");
+              display_show_image(buffer, content_size, true);
+              DisplayedImage::remember(szTemp); // current image becomes the previous image
+              String _curPath = preferences.getString(PREFERENCES_CURRENT_PATH_KEY, "");
+              String _lastPath = preferences.getString(PREFERENCES_LAST_PATH_KEY, "");
+              if (!_curPath.isEmpty() && (_curPath != String(szTemp) || _lastPath.isEmpty()))
+                preferences.putString(PREFERENCES_LAST_PATH_KEY, _curPath);
+              preferences.putString(PREFERENCES_CURRENT_PATH_KEY, String(szTemp));
+              #ifdef BOARD_TRMNL_X
+              update_playlist_order(szTemp, _curPath.c_str());
+              preferences.remove(PREFERENCES_PREFETCH_PATH_KEY);
+              #endif
+              preferences.putString(PREFERENCES_BROWSE_PATH_KEY, String(szTemp));
+            }
             if (buffer_malloc) {
               Log.info("%s [%d]: Freeing the image buffer we allocated\r\n", __FILE__, __LINE__);
               free(buffer);
             }
             buffer = nullptr;
             png_res = PNG_NO_ERR; // DEBUG
-            String _curPath = preferences.getString(PREFERENCES_CURRENT_PATH_KEY, "");
-            String _lastPath = preferences.getString(PREFERENCES_LAST_PATH_KEY, "");
-            if (!_curPath.isEmpty() && (_curPath != String(szTemp) || _lastPath.isEmpty()))
-              preferences.putString(PREFERENCES_LAST_PATH_KEY, _curPath);
-            preferences.putString(PREFERENCES_CURRENT_PATH_KEY, String(szTemp));
-            #ifdef BOARD_TRMNL_X
-            update_playlist_order(szTemp, _curPath.c_str());
-            #endif
-            preferences.putString(PREFERENCES_BROWSE_PATH_KEY, String(szTemp));
           }
           else
           {
