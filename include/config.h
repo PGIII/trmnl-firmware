@@ -35,6 +35,7 @@
 #define PREFERENCES_LAST_PATH_KEY            "last_path"
 #define PREFERENCES_PLAYLIST_ORDER_KEY       "playlist_order"
 #define PREFERENCES_BROWSE_PATH_KEY          "browse_path"
+#define PREFERENCES_PREFETCH_PATH_KEY        "prefetch_path"
 #define MAX_CACHED_IMAGES                    30
 #define PREFERENCES_LAST_SLEEP_TIME          "last_sleep"
 #define PREFERENCES_CONNECT_API_RETRY_COUNT  "retry_count"

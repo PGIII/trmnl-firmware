@@ -46,6 +46,10 @@ struct ApiDisplayResponse {
   SPECIAL_FUNCTION special_function;
   String action;
   String touchbar_mode;
+  // Opt-in: when true, the device should download and cache the image (so it
+  // takes its place in the local browse order) without showing it on screen.
+  // Absent on older servers, in which case behaviour is unchanged.
+  bool prefetch;
 };
 
 struct ApiDisplayInputs {

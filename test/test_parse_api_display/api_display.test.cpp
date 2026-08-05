@@ -11,6 +11,7 @@ void assert_response_equal(ApiDisplayResponse expected, ApiDisplayResponse actua
   TEST_ASSERT_EQUAL(expected.reset_firmware, actual.reset_firmware);
   TEST_ASSERT_EQUAL(expected.special_function, actual.special_function);
   TEST_ASSERT_EQUAL_STRING(expected.action.c_str(), actual.action.c_str());
+  TEST_ASSERT_EQUAL(expected.prefetch, actual.prefetch);
 }
 
 void test_parseResponse_apiDisplay_success(void) {
@@ -68,6 +69,27 @@ void test_parseResponse_apiDisplay_treats_unknown_sf_as_none(void) {
   TEST_ASSERT_EQUAL(parsed.special_function, SPECIAL_FUNCTION::SF_NONE);
 }
 
+void test_parseResponse_apiDisplay_prefetch_absent_defaults_false(void) {
+  String input = "{}";
+
+  auto parsed = parseResponse_apiDisplay(input);
+  TEST_ASSERT_EQUAL(false, parsed.prefetch);
+}
+
+void test_parseResponse_apiDisplay_prefetch_true(void) {
+  String input = "{\"prefetch\":true}";
+
+  auto parsed = parseResponse_apiDisplay(input);
+  TEST_ASSERT_EQUAL(true, parsed.prefetch);
+}
+
+void test_parseResponse_apiDisplay_prefetch_false(void) {
+  String input = "{\"prefetch\":false}";
+
+  auto parsed = parseResponse_apiDisplay(input);
+  TEST_ASSERT_EQUAL(false, parsed.prefetch);
+}
+
 void setUp(void) {
   // set stuff up here
 }
@@ -82,6 +104,9 @@ void process() {
   RUN_TEST(test_parseResponse_apiDisplay_deserializationError);
   RUN_TEST(test_parseResponse_apiDisplay_treats_unknown_sf_as_none);
   RUN_TEST(test_parseResponse_apiDisplay_missing_fields);
+  RUN_TEST(test_parseResponse_apiDisplay_prefetch_absent_defaults_false);
+  RUN_TEST(test_parseResponse_apiDisplay_prefetch_true);
+  RUN_TEST(test_parseResponse_apiDisplay_prefetch_false);
   UNITY_END();
 }
 
