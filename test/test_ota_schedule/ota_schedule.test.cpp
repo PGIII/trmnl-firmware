@@ -27,12 +27,15 @@ void test_unsynced_clock_does_not_underflow_into_due(void) { TEST_ASSERT_FALSE(o
 
 // A backwards clock (now < lastOta, but now != 0) used to underflow the unsigned subtraction
 // to ~4.29 billion, which is >= OTA_RETRY_INTERVAL_SECONDS and so wrongly satisfied the
-// interval check. It should instead be treated as "attempt due" via an explicit guard, not
-// as an accidental side effect of the underflow.
+// interval check, causing an OTA attempt on every wake forever. The stored timestamp is
+// untrustworthy in this case, so otaAttemptDue() must return false instead. These assertions
+// fail against the pre-fix implementation, which returned true via the underflow (or via an
+// explicit "return true" guard that reproduces the same broken behavior) — that's what makes
+// this a real regression test rather than a no-op.
 void test_backwards_clock_does_not_satisfy_interval_by_underflow(void) {
   const uint32_t lastOta = 1700000000UL;
-  TEST_ASSERT_TRUE(otaAttemptDue(lastOta - 1, lastOta));
-  TEST_ASSERT_TRUE(otaAttemptDue(1, lastOta));
+  TEST_ASSERT_FALSE(otaAttemptDue(lastOta - 1, lastOta));
+  TEST_ASSERT_FALSE(otaAttemptDue(1, lastOta));
 }
 
 void setUp(void) {}

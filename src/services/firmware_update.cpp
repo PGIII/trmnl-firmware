@@ -37,14 +37,19 @@ bool FirmwareUpdateService::isUpdateDue(bool update_firmware, const String &firm
   uint32_t now = _clock.getTime();
   uint32_t lastOta = otaLastAttempt(_persistence);
   if (!otaAttemptDue(now, lastOta)) {
-        // DIAGNOSTIC: otaAttemptDue() returns false both when the clock is unavailable and
-        // when the cooldown is genuinely still active, and info-level logs never leave the
-        // device. Disambiguate here with submitted (ERROR-level) logs so we can tell, from
-        // the server side, which case is actually happening.
+    // DIAGNOSTIC: otaAttemptDue() returns false both when the clock is unavailable and
+    // when the cooldown is genuinely still active, and info-level logs never leave the
+    // device. Disambiguate here with submitted (ERROR-level) logs so we can tell, from
+    // the server side, which case is actually happening.
     if (now == 0 && lastOta != 0) {
       Log_error_submit("%s [%d]: OTA check: clock unavailable (now=0), cannot evaluate cooldown; lastOta=%" PRIu32
                         "\r\n",
                         __FILE__, __LINE__, lastOta);
+    } else if (now != 0 && now < lastOta) {
+      Log_error_submit("%s [%d]: OTA check: backwards clock detected, now=%" PRIu32 " < lastOta=%" PRIu32
+                        "; repairing stored timestamp\r\n",
+                        __FILE__, __LINE__, now, lastOta);
+      otaRecordAttempt(_persistence, now);
     } else {
       uint32_t remaining =
         (lastOta + OTA_RETRY_INTERVAL_SECONDS > now) ? (lastOta + OTA_RETRY_INTERVAL_SECONDS - now) : 0;
@@ -55,7 +60,7 @@ bool FirmwareUpdateService::isUpdateDue(bool update_firmware, const String &firm
     return false;
   }
 
-    // DIAGNOSTIC: submitted so we can confirm the OTA is actually being attempted.
+  // DIAGNOSTIC: submitted so we can confirm the OTA is actually being attempted.
   Log_error_submit("%s [%d]: OTA check: cooldown satisfied, proceeding with download (now=%" PRIu32
                     ", lastOta=%" PRIu32 ")\r\n",
                     __FILE__, __LINE__, now, lastOta);
@@ -176,14 +181,14 @@ FirmwareUpdateResult FirmwareUpdateService::performUpdate() {
   uint32_t now = _clock.getTime();
   if (!performFirmwareUpdate()) {
     Log_info("%s [%d]: OTA update failed, storing the timestamp to prevent boot looping.\r\n", __FILE__, __LINE__);
-        // DIAGNOSTIC: submitted so the outcome of an OTA attempt is visible to the server.
+    // DIAGNOSTIC: submitted so the outcome of an OTA attempt is visible to the server.
     Log_error_submit("%s [%d]: OTA outcome: FAILED, failureMessage=%d\r\n", __FILE__, __LINE__, _failureMessage);
     otaRecordAttempt(_persistence, now);
     result.failureMessage = _failureMessage;
     return result;
   }
 
-    // DIAGNOSTIC: submitted so the outcome of an OTA attempt is visible to the server.
+  // DIAGNOSTIC: submitted so the outcome of an OTA attempt is visible to the server.
   Log_error_submit("%s [%d]: OTA outcome: SUCCESS\r\n", __FILE__, __LINE__);
   result.updated = true;
   return result;
