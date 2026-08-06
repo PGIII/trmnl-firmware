@@ -204,6 +204,12 @@ static bool tryFastConnect(const WifiCredentials &credentials) {
     int32_t rssi = WiFi.RSSI();
     Log_info("WiFi: Fast connect succeeded, RSSI %d dBm", rssi);
     if (rssi >= WIFI_FAST_CONNECT_MIN_RSSI) {
+        // Modem sleep (WIFI_PS_MIN_MODEM, the ESP32 default) depends on the AP correctly
+        // buffering unicast frames across DTIM intervals and delivering them on wake. When
+        // an AP mishandles that buffering, transfers can stall for several seconds even at
+        // full signal strength. Disable it once a connection is confirmed so HTTP transfers
+        // aren't held hostage by flaky AP power-save behavior.
+      WiFi.setSleep(false);
       return true;
     }
     Log_info("WiFi: Weak signal (%d dBm < %d dBm), scanning for better AP", rssi, WIFI_FAST_CONNECT_MIN_RSSI);
@@ -355,6 +361,14 @@ WifiConnectionResult initiateConnectionAndWaitForOutcome(const WifiCredentials c
   }
 
   auto result = waitForConnectResult(CONNECTION_TIMEOUT);
+
+  if (result == WL_CONNECTED) {
+        // See the comment in tryFastConnect() above: modem sleep depends on the AP correctly
+        // buffering frames across DTIM intervals, and when it doesn't, transfers stall for
+        // seconds at full signal strength. Disable it here too so the full-scan connect path
+        // (both WPA2-Personal and WPA2-Enterprise) gets the same protection.
+    WiFi.setSleep(false);
+  }
 
     // if connection failed and we were using enterprise, clean up
   if (result != WL_CONNECTED && credentials.isEnterprise) {
