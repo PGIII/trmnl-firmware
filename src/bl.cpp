@@ -86,6 +86,9 @@ void showMessageWithLogo(MSG message_type);
 static void showMessageWithLogo(MSG message_type, String friendly_id, bool id, const char *fw_version, String message);
 static void showMessageWithLogo(MSG message_type, const ApiSetupResponse &apiResponse);
 static void wifiErrorDeepSleep();
+#ifdef BOARD_TRMNL_X
+static bool usbPowerPresent(void);                   // true if the fuel gauge says we're not discharging (i.e. USB power is present)
+#endif
 static uint8_t *storedLogoOrDefault(int iType);
 static DeviceStatusStamp getDeviceStatusStamp();
 void config_gpio_for_lp();
@@ -2962,6 +2965,31 @@ static void resetDeviceCredentials(void)
   ESP.restart();
 }
 
+#ifdef BOARD_TRMNL_X
+/**
+ * @brief Detect USB power via the BQ27427 fuel gauge so goToSleep() can stay
+ * awake instead of deep sleeping. The USB-Serial/JTAG peripheral is powered
+ * down during deep sleep, so a device that only wakes for ~15s every 10
+ * minutes is effectively un-flashable/un-monitorable over USB unless we skip
+ * deep sleep while USB power is present.
+ *
+ * The DSG flag is set while the battery is discharging and clear while it is
+ * being charged (or held at float once full), so !dsgFlag() is a reasonable
+ * proxy for "USB power present". If the gauge never made it through
+ * initialization (lipo._initialized stays false — the same guard already used
+ * elsewhere in this file to decide whether gauge readings are trustworthy),
+ * treat that as "on battery" so a broken/absent gauge can never keep the
+ * device awake draining the battery.
+ */
+static bool usbPowerPresent(void)
+{
+  if (!lipo._initialized) {
+    return false;
+  }
+  return !lipo.dsgFlag();
+}
+#endif // BOARD_TRMNL_X
+
 /**
  * @brief Function to sleep preparing and go to sleep
  * @param none
@@ -3035,6 +3063,17 @@ void goToSleep(void)
   gpio_hold_en(GPIO_NUM_13); // MOSFET enabling the battery power
   gpio_deep_sleep_hold_en(); // Needed to keep the battery power enabled during RTC sleep
 #endif
+#endif
+#ifdef BOARD_TRMNL_X
+  if (usbPowerPresent()) {
+    // Deep sleep powers down the USB-Serial/JTAG peripheral, which makes USB
+    // flashing/monitoring unreliable. Stay awake for the same duration
+    // instead, then restart so the normal wake-work-sleep flow runs again.
+    Log_info("USB power detected - skipping deep sleep, staying awake for %u s instead", (unsigned)time_to_sleep);
+    delay((uint32_t)time_to_sleep * 1000UL);
+    ESP.restart();
+    return;
+  }
 #endif
   esp_deep_sleep_start();
 }
