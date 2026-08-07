@@ -436,17 +436,41 @@ static void update_playlist_order(const char *new_path, const char *prev_path) {
 static void show_cached_image_by_offset(int offset) {
   String order = preferences.getString(PREFERENCES_PLAYLIST_ORDER_KEY, "");
 
+  // DIAGNOSTIC (noisy, submitted): entry point for local playlist navigation --
+  // this path never contacts the server, so this is our only visibility into it.
+  {
+    bool order_truncated = order.length() > 400;
+    String order_preview = order_truncated ? order.substring(0, 400) + "..." : order;
+    Log_error_submit("DIAG nav: show_cached_image_by_offset(offset=%d) order=\"%s\"%s",
+                      offset, order_preview.c_str(),
+                      order_truncated ? " (truncated to 400 chars)" : "");
+  }
+
   if (order.isEmpty()) {
+    const char *fallback_key = (offset > 0) ? "CURRENT_PATH" : "LAST_PATH";
     String path = (offset > 0)
       ? preferences.getString(PREFERENCES_CURRENT_PATH_KEY, "")
       : preferences.getString(PREFERENCES_LAST_PATH_KEY, "");
-    if (path.isEmpty()) { Log_info("No cached image for gesture"); return; }
+    // DIAGNOSTIC (noisy, submitted): playlist order empty, so we fall back to
+    // the single remembered path instead of a real playlist.
+    Log_error_submit("DIAG nav: playlist order empty, fallback=%s path=\"%s\" empty=%d",
+                      fallback_key, path.c_str(), path.isEmpty());
+    if (path.isEmpty()) {
+      // DIAGNOSTIC (noisy, submitted): nothing to navigate to.
+      Log_error_submit("DIAG nav: no cached image for gesture (fallback path empty)");
+      Log_info("No cached image for gesture");
+      return;
+    }
     int file_size = 0;
     buffer = display_read_file(path.c_str(), &file_size);
     if (buffer && file_size > 0) {
       display_show_image(buffer, file_size, true);
       DisplayedImage::remember(path.c_str());
       goToSleep();
+    } else {
+      // DIAGNOSTIC (noisy, submitted): fallback path resolved but the file
+      // failed to read.
+      Log_error_submit("DIAG nav: failed to read fallback image \"%s\"", path.c_str());
     }
     return;
   }
@@ -457,36 +481,79 @@ static void show_cached_image_by_offset(int offset) {
   while (start <= (int)order.length() && count < MAX_CACHED_IMAGES) {
     int sep = order.indexOf('|', start);
     String entry = (sep < 0) ? order.substring(start) : order.substring(start, sep);
-    if (!entry.isEmpty() && filesystem_file_exists(entry.c_str())) {
-      strncpy(images[count], entry.c_str(), 35);
-      images[count][35] = '\0';
-      count++;
+    if (!entry.isEmpty()) {
+      if (filesystem_file_exists(entry.c_str())) {
+        strncpy(images[count], entry.c_str(), 35);
+        images[count][35] = '\0';
+        count++;
+      } else {
+        // DIAGNOSTIC (noisy, submitted): a playlist entry did not land on
+        // flash -- prime suspect for prefetched frames that silently vanish.
+        Log_error_submit("DIAG nav: dropping playlist entry \"%s\" (file not found on flash)",
+                          entry.c_str());
+      }
     }
     if (sep < 0) break;
     start = sep + 1;
   }
 
-  if (count == 0) { Log_info("No cached images available"); return; }
+  // DIAGNOSTIC (noisy, submitted): how many cached images survived filtering.
+  Log_error_submit("DIAG nav: %d cached image(s) available after filtering", count);
+
+  if (count == 0) {
+    // DIAGNOSTIC (noisy, submitted): everything was dropped above (or order
+    // parsed to nothing), so there is nothing to navigate to.
+    Log_error_submit("DIAG nav: no cached images available");
+    Log_info("No cached images available");
+    return;
+  }
 
   String browsePath = preferences.getString(PREFERENCES_BROWSE_PATH_KEY, "");
+  const char *browse_source = "BROWSE_PATH_KEY";
   if (browsePath.isEmpty()) {
     // Seed from last_path so first RIGHT shows curr_path (forward) and first LEFT shows older (backward).
     // Falls back to curr_path if last_path is absent (e.g. only one image cached).
     String lp = preferences.getString(PREFERENCES_LAST_PATH_KEY, "");
-    browsePath = lp.isEmpty() ? preferences.getString(PREFERENCES_CURRENT_PATH_KEY, "") : lp;
+    if (!lp.isEmpty()) {
+      browsePath = lp;
+      browse_source = "LAST_PATH (fallback)";
+    } else {
+      browsePath = preferences.getString(PREFERENCES_CURRENT_PATH_KEY, "");
+      browse_source = "CURRENT_PATH (fallback)";
+    }
   }
 
   int cur_idx = count - 1;
+  bool browse_path_found = false;
   for (int i = 0; i < count; i++) {
-    if (browsePath == String(images[i])) { cur_idx = i; break; }
+    if (browsePath == String(images[i])) { cur_idx = i; browse_path_found = true; break; }
+  }
+
+  // DIAGNOSTIC (noisy, submitted): where browsePath came from and whether it
+  // matched a cached image.
+  Log_error_submit("DIAG nav: browsePath=\"%s\" source=%s found=%d cur_idx=%d",
+                    browsePath.c_str(), browse_source, browse_path_found, cur_idx);
+  if (!browse_path_found) {
+    // DIAGNOSTIC (noisy, submitted): browsePath didn't match any cached
+    // image, so cur_idx silently defaulted to count-1 -- this changes which
+    // image a tap lands on.
+    Log_error_submit("DIAG nav: browsePath not found among cached images, cur_idx defaulted to count-1 (%d)",
+                      cur_idx);
   }
 
   int new_idx = (cur_idx + offset + count) % count;
-  Log_info("Playlist browse: %d/%d -> %d (%s)", cur_idx, count, new_idx, images[new_idx]);
+  // DIAGNOSTIC (noisy, submitted): converted from Log_info to a submitted log.
+  Log_error_submit("Playlist browse: %d/%d -> %d (%s)", cur_idx, count, new_idx, images[new_idx]);
 
   int file_size = 0;
   buffer = display_read_file(images[new_idx], &file_size);
-  if (!buffer || file_size == 0) { Log_info("Failed to read %s", images[new_idx]); return; }
+  if (!buffer || file_size == 0) {
+    // DIAGNOSTIC (noisy, submitted): resolved a target image but failed to
+    // read it back from flash.
+    Log_error_submit("DIAG nav: failed to read cached image \"%s\"", images[new_idx]);
+    Log_info("Failed to read %s", images[new_idx]);
+    return;
+  }
 
   preferences.putString(PREFERENCES_BROWSE_PATH_KEY, String(images[new_idx]));
   display_show_image(buffer, file_size, true);
@@ -499,6 +566,11 @@ void check_channel_states(void)
   /* Loop through all the active channels */
   for (uint8_t i = 0; i < 3; i++) {
     if (iqs323.channel_touchState((iqs323_channel_e)(i))) {
+      // DIAGNOSTIC (noisy, submitted): which touch zone was detected, every
+      // touch wake -- navigation via show_cached_image_by_offset() never
+      // otherwise contacts the server, so this is our only visibility into it.
+      Log_error_submit("DIAG nav: touch zone detected: %s (channel %d, tap_mode=%d)",
+                        (i == 0) ? "LEFT" : (i == 1) ? "MIDDLE" : "RIGHT", i, touchbar_tap_mode);
       if (touchbar_tap_mode) {
         // Tap mode
         bool hold = tap_mode_is_hold(i, 2000);  // 2 second hold for tap mode actions
@@ -636,12 +708,16 @@ void read_gesture_event(void)
         case IQS323_GESTURE_SWIPE_NEGATIVE:
           Log_info("SLIDER: Swipe <-");
           if (!touchbar_tap_mode) {
+            // DIAGNOSTIC (noisy, submitted): touch zone equivalent for slide mode.
+            Log_error_submit("DIAG nav: touch zone detected: SWIPE_NEGATIVE (slide mode)");
             show_cached_image_by_offset(-1);
           }
           break;
         case IQS323_GESTURE_SWIPE_POSITIVE:
           Log_info("SLIDER: Swipe ->");
           if (!touchbar_tap_mode) {
+            // DIAGNOSTIC (noisy, submitted): touch zone equivalent for slide mode.
+            Log_error_submit("DIAG nav: touch zone detected: SWIPE_POSITIVE (slide mode)");
             show_cached_image_by_offset(+1);
           }
           break;
@@ -1682,6 +1758,101 @@ static void prefetch_into_playlist(const char *new_path) {
 #endif
 }
 
+// Downloads every entry of a `prefetch_batch` response (api_types.h) and
+// registers each one in the playlist browse order via
+// `prefetch_into_playlist()`, exactly like a single opt-in `prefetch: true`
+// response -- just looped. Reuses the same `withHttp` + `downloadStream`
+// transport already used elsewhere in this codebase for a plain "download a
+// file to a buffer" job (see DeviceSetup::downloadSetupImage), rather than
+// the primary image path's inline lambda in downloadAndShow(), which is
+// tightly coupled to PNG/BMP decoding and on-screen display and isn't a good
+// fit to reuse as-is.
+//
+// Must be called while WiFi is still associated (i.e. before the primary
+// image path's WiFi.disconnect()): the whole point of batching is to avoid
+// paying a fresh ~14s WiFi-association cost per extra frame.
+//
+// Each entry is independently fault-tolerant: a failed download is logged
+// and skipped, never aborting the rest of the batch or blocking sleep. Only
+// one entry's image buffer is ever allocated at a time.
+static void run_prefetch_batch(const ApiDisplayResponse &response, ApiDisplayInputs &apiDisplayInputs) {
+  uint8_t total = response.prefetch_batch_count;
+  if (total == 0) return;
+
+  Log_info("prefetch_batch: fetching %u extra image(s)", total);
+
+  uint8_t succeeded = 0;
+  uint32_t total_bytes = 0;
+
+  for (uint8_t i = 0; i < total; i++) {
+    const PrefetchBatchEntry &entry = response.prefetch_batch[i];
+    char szTemp[36];
+    filesystem_fix_filename(entry.filename.c_str(), szTemp);
+
+    uint32_t downloaded = 0;
+
+    withHttp(entry.url, [&](HTTPClient *httpsp, HttpError error) -> bool {
+      if (error != HttpError::HTTPCLIENT_SUCCESS) {
+        Log_error_submit("prefetch_batch: unable to connect for %s", entry.filename.c_str());
+        return false;
+      }
+
+      HTTPClient &https = *httpsp;
+      https.setTimeout(15000);
+      https.setConnectTimeout(15000);
+      https.addHeader("Accept-Encoding", "identity"); // Disable compression for raw image data
+
+      // Include ID and Access Token if the image is hosted on the same server as the API
+      if (entry.url.startsWith(apiDisplayInputs.baseUrl))
+        applyHeaders(https, buildImageHeaders(apiDisplayInputs));
+
+      int httpCode = https.GET();
+      if (httpCode != HTTP_CODE_OK) {
+        Log_error_submit("prefetch_batch: GET failed for %s: %d (%s)", entry.filename.c_str(), httpCode,
+                          https.errorToString(httpCode).c_str());
+        return false;
+      }
+
+      int content_size = https.getSize();
+      if (content_size <= 0 || content_size > MAX_IMAGE_SIZE) {
+        Log_error_submit("prefetch_batch: bad content size for %s: %d", entry.filename.c_str(), content_size);
+        return false;
+      }
+
+      uint8_t *entry_buffer = (uint8_t *)malloc(content_size);
+      if (!entry_buffer) {
+        Log_error_submit("prefetch_batch: out of memory (%d bytes) for %s", content_size, entry.filename.c_str());
+        return false;
+      }
+
+      WiFiClient *stream = https.getStreamPtr();
+      uint32_t counter = downloadStream(stream, content_size, entry_buffer);
+      if (counter != (uint32_t)content_size) {
+        free(entry_buffer);
+        Log_error_submit("prefetch_batch: incomplete download for %s (%" PRIu32 "/%d bytes)", entry.filename.c_str(),
+                          counter, content_size);
+        return false;
+      }
+
+      filesystem_purge_old_file(szTemp);
+      writeImageToFile(szTemp, entry_buffer, content_size);
+      free(entry_buffer); // free between iterations -- never hold more than one entry's bytes at a time
+      downloaded = counter;
+      return true;
+    });
+
+    if (downloaded > 0) {
+      prefetch_into_playlist(szTemp);
+      succeeded++;
+      total_bytes += downloaded;
+    }
+    // On failure the lambda above already logged the reason via
+    // Log_error_submit; move on to the next entry regardless.
+  }
+
+  Log_info_submit("prefetch_batch: %u/%u succeeded, %" PRIu32 " bytes total", succeeded, total, total_bytes);
+}
+
 /**
  * @brief Function to ping server and download and show the image if all is OK
  * @param url Server URL address
@@ -1744,6 +1915,7 @@ static https_request_err_e downloadAndShow()
         // "currently displayed" bookkeeping.
         prefetch_into_playlist(szTemp);
         buffer = nullptr;
+        run_prefetch_batch(apiDisplayResult.response, apiDisplayInputs);
         return result;
       }
 #if BOARD_X_CLASS && !defined(BOARD_SEEED_RETERMINAL_E1003)
@@ -1755,6 +1927,7 @@ static https_request_err_e downloadAndShow()
         // We just displayed the same image, don't refresh the display
         Log.info("%s [%d]: The image hasn't changed since the last wakeup, don't refresh the display.\r\n", __FILE__, __LINE__);
         buffer = nullptr;
+        run_prefetch_batch(apiDisplayResult.response, apiDisplayInputs);
         return result;
       }
       DisplayedImage::remember(szTemp);
@@ -1781,6 +1954,7 @@ static https_request_err_e downloadAndShow()
       preferences.remove(PREFERENCES_PREFETCH_PATH_KEY);
       #endif
       preferences.putString(PREFERENCES_BROWSE_PATH_KEY, String(szTemp));
+      run_prefetch_batch(apiDisplayResult.response, apiDisplayInputs);
       return result;
   }
 
@@ -2034,6 +2208,10 @@ static https_request_err_e downloadAndShow()
           }
 
           submitStoredLogs();
+
+          // Batch prefetch (if any) must run before WiFi goes down below --
+          // that's the whole point of batching multiple frames into one wake.
+          run_prefetch_batch(apiDisplayResult.response, apiDisplayInputs);
 
           WiFi.disconnect(true); // no need for WiFi, save power starting here
           Log.info("%s [%d]: Received successfully; WiFi off.\r\n", __FILE__, __LINE__);

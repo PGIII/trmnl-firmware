@@ -30,6 +30,18 @@ enum class ApiDisplayOutcome {
   DeserializationError,
 };
 
+// Maximum number of extra images accepted from a `prefetch_batch` array in a
+// single /api/display response. ESP32 RAM can't hold an unbounded recipe's
+// worth of image buffers at once, and no real recipe needs more than a
+// handful of frames per wake -- entries beyond this are ignored rather than
+// overflowing a fixed-size array.
+#define PREFETCH_BATCH_MAX_ENTRIES 16
+
+struct PrefetchBatchEntry {
+  String filename;
+  String url;
+};
+
 struct ApiDisplayResponse {
   ApiDisplayOutcome outcome;
   String error_detail;
@@ -50,6 +62,14 @@ struct ApiDisplayResponse {
   // takes its place in the local browse order) without showing it on screen.
   // Absent on older servers, in which case behaviour is unchanged.
   bool prefetch;
+  // Opt-in: additional images to download and cache (without displaying) in
+  // this same wake, alongside the primary image/prefetch above -- lets a
+  // multi-step recipe warm its entire local browse order in a single wake
+  // instead of one wake per frame. Absent, null, or an empty array means
+  // nothing extra to fetch, which is the safe default for older servers.
+  // Capped at PREFETCH_BATCH_MAX_ENTRIES; additional entries are ignored.
+  PrefetchBatchEntry prefetch_batch[PREFETCH_BATCH_MAX_ENTRIES];
+  uint8_t prefetch_batch_count;
 };
 
 struct ApiDisplayInputs {
