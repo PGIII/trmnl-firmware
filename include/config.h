@@ -1,9 +1,16 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// Overridable via build flags (e.g. -D FW_PATCH_VERSION=13); defaults below.
+#ifndef FW_MAJOR_VERSION
 #define FW_MAJOR_VERSION 1
+#endif
+#ifndef FW_MINOR_VERSION
 #define FW_MINOR_VERSION 8
+#endif
+#ifndef FW_PATCH_VERSION
 #define FW_PATCH_VERSION 10
+#endif
 
 // Helper macros for stringification
 #define STRINGIFY(x)     #x
