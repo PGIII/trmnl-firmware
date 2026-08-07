@@ -79,7 +79,9 @@ ApiDisplayResponse parseResponse_apiDisplay(String &payload) {
     }
     String entry_filename = entry["filename"] | "";
     String entry_url = entry["url"] | "";
-    if (entry_filename.isEmpty() || entry_url.isEmpty() ||
+    // length() rather than isEmpty(): the native ArduinoFake String shim used by `pio test -e
+    // native` has no isEmpty(), so using it here compiles on hardware but breaks the unit tests.
+    if (entry_filename.length() == 0 || entry_url.length() == 0 ||
         entry_filename.length() > PREFETCH_BATCH_FILENAME_MAX_LEN) {
       Log_error("prefetch_batch: skipping malformed entry (missing filename/url or filename too long)");
       continue;
