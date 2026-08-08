@@ -2821,6 +2821,16 @@ static void goToSleepButtonOnly(void)
   gpio_hold_en(GPIO_NUM_13);
   gpio_deep_sleep_hold_en();
 #endif
+#ifdef DEBUG_FORCE_USB_AWAKE
+  // DEBUG BUILD ONLY. goToSleep() has the USB stay-awake check, but this is a second, separate
+  // deep-sleep entry point -- and it is the one the API-error path takes ("Max retries done"),
+  // so the guard over there never ran and the port kept vanishing mid-investigation. Deep sleep
+  // powers down USB-Serial/JTAG, which is the only channel this device has: it cannot submit
+  // logs over 5 GHz and its local log store is failing too.
+  Log_info("DEBUG_FORCE_USB_AWAKE: skipping button-only deep sleep, restarting in 300s");
+  delay(300000UL);
+  ESP.restart();
+#endif
   esp_deep_sleep_start();
 }
 void config_gpio_for_lp() {
