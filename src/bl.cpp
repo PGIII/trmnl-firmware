@@ -444,7 +444,7 @@ static void show_cached_image_by_offset(int offset) {
   {
     bool order_truncated = order.length() > 400;
     String order_preview = order_truncated ? order.substring(0, 400) + "..." : order;
-    Log_error_submit("DIAG nav: show_cached_image_by_offset(offset=%d) order=\"%s\"%s",
+    Log_error("DIAG nav: show_cached_image_by_offset(offset=%d) order=\"%s\"%s",
                       offset, order_preview.c_str(),
                       order_truncated ? " (truncated to 400 chars)" : "");
   }
@@ -456,11 +456,11 @@ static void show_cached_image_by_offset(int offset) {
       : preferences.getString(PREFERENCES_LAST_PATH_KEY, "");
     // DIAGNOSTIC (noisy, submitted): playlist order empty, so we fall back to
     // the single remembered path instead of a real playlist.
-    Log_error_submit("DIAG nav: playlist order empty, fallback=%s path=\"%s\" empty=%d",
+    Log_error("DIAG nav: playlist order empty, fallback=%s path=\"%s\" empty=%d",
                       fallback_key, path.c_str(), path.isEmpty());
     if (path.isEmpty()) {
       // DIAGNOSTIC (noisy, submitted): nothing to navigate to.
-      Log_error_submit("DIAG nav: no cached image for gesture (fallback path empty)");
+      Log_error("DIAG nav: no cached image for gesture (fallback path empty)");
       Log_info("No cached image for gesture");
       return;
     }
@@ -473,7 +473,7 @@ static void show_cached_image_by_offset(int offset) {
     } else {
       // DIAGNOSTIC (noisy, submitted): fallback path resolved but the file
       // failed to read.
-      Log_error_submit("DIAG nav: failed to read fallback image \"%s\"", path.c_str());
+      Log_error("DIAG nav: failed to read fallback image \"%s\"", path.c_str());
     }
     return;
   }
@@ -492,7 +492,7 @@ static void show_cached_image_by_offset(int offset) {
       } else {
         // DIAGNOSTIC (noisy, submitted): a playlist entry did not land on
         // flash -- prime suspect for prefetched frames that silently vanish.
-        Log_error_submit("DIAG nav: dropping playlist entry \"%s\" (file not found on flash)",
+        Log_error("DIAG nav: dropping playlist entry \"%s\" (file not found on flash)",
                           entry.c_str());
       }
     }
@@ -501,12 +501,12 @@ static void show_cached_image_by_offset(int offset) {
   }
 
   // DIAGNOSTIC (noisy, submitted): how many cached images survived filtering.
-  Log_error_submit("DIAG nav: %d cached image(s) available after filtering", count);
+  Log_error("DIAG nav: %d cached image(s) available after filtering", count);
 
   if (count == 0) {
     // DIAGNOSTIC (noisy, submitted): everything was dropped above (or order
     // parsed to nothing), so there is nothing to navigate to.
-    Log_error_submit("DIAG nav: no cached images available");
+    Log_error("DIAG nav: no cached images available");
     Log_info("No cached images available");
     return;
   }
@@ -534,26 +534,26 @@ static void show_cached_image_by_offset(int offset) {
 
   // DIAGNOSTIC (noisy, submitted): where browsePath came from and whether it
   // matched a cached image.
-  Log_error_submit("DIAG nav: browsePath=\"%s\" source=%s found=%d cur_idx=%d",
+  Log_error("DIAG nav: browsePath=\"%s\" source=%s found=%d cur_idx=%d",
                     browsePath.c_str(), browse_source, browse_path_found, cur_idx);
   if (!browse_path_found) {
     // DIAGNOSTIC (noisy, submitted): browsePath didn't match any cached
     // image, so cur_idx silently defaulted to count-1 -- this changes which
     // image a tap lands on.
-    Log_error_submit("DIAG nav: browsePath not found among cached images, cur_idx defaulted to count-1 (%d)",
+    Log_error("DIAG nav: browsePath not found among cached images, cur_idx defaulted to count-1 (%d)",
                       cur_idx);
   }
 
   int new_idx = (cur_idx + offset + count) % count;
   // DIAGNOSTIC (noisy, submitted): converted from Log_info to a submitted log.
-  Log_error_submit("Playlist browse: %d/%d -> %d (%s)", cur_idx, count, new_idx, images[new_idx]);
+  Log_error("Playlist browse: %d/%d -> %d (%s)", cur_idx, count, new_idx, images[new_idx]);
 
   int file_size = 0;
   buffer = display_read_file(images[new_idx], &file_size);
   if (!buffer || file_size == 0) {
     // DIAGNOSTIC (noisy, submitted): resolved a target image but failed to
     // read it back from flash.
-    Log_error_submit("DIAG nav: failed to read cached image \"%s\"", images[new_idx]);
+    Log_error("DIAG nav: failed to read cached image \"%s\"", images[new_idx]);
     Log_info("Failed to read %s", images[new_idx]);
     return;
   }
@@ -2983,10 +2983,25 @@ static void resetDeviceCredentials(void)
  */
 static bool usbPowerPresent(void)
 {
+#ifdef DEBUG_FORCE_USB_AWAKE
+  // DEBUG BUILD ONLY: never deep sleep, whatever the gauge says.
+  //
+  // The DSG-flag probe below is too weak to depend on for a debugging session.
+  // A laptop port may not source enough current to clear DSG at all, and the
+  // BQ27427 updates the flag on its own cadence, so a device that is plainly
+  // plugged in still reports "discharging" and deep sleeps anyway. Observed
+  // directly: the USB port enumerated for a moment and vanished, twice.
+  //
+  // Deep sleep powers down USB-Serial/JTAG, so that costs us the serial console
+  // -- the only reliable channel for the offline touchbar-navigation path we
+  // are trying to debug. Force the awake path so the port stays put.
+  return true;
+#else
   if (!lipo._initialized) {
     return false;
   }
   return !lipo.dsgFlag();
+#endif
 }
 #endif // BOARD_TRMNL_X
 
