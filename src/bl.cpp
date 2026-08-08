@@ -572,7 +572,7 @@ void check_channel_states(void)
       // DIAGNOSTIC (noisy, submitted): which touch zone was detected, every
       // touch wake -- navigation via show_cached_image_by_offset() never
       // otherwise contacts the server, so this is our only visibility into it.
-      Log_error_submit("DIAG nav: touch zone detected: %s (channel %d, tap_mode=%d)",
+      Log_error("DIAG nav: touch zone detected: %s (channel %d, tap_mode=%d)",
                         (i == 0) ? "LEFT" : (i == 1) ? "MIDDLE" : "RIGHT", i, touchbar_tap_mode);
       if (touchbar_tap_mode) {
         // Tap mode
@@ -712,7 +712,7 @@ void read_gesture_event(void)
           Log_info("SLIDER: Swipe <-");
           if (!touchbar_tap_mode) {
             // DIAGNOSTIC (noisy, submitted): touch zone equivalent for slide mode.
-            Log_error_submit("DIAG nav: touch zone detected: SWIPE_NEGATIVE (slide mode)");
+            Log_error("DIAG nav: touch zone detected: SWIPE_NEGATIVE (slide mode)");
             show_cached_image_by_offset(-1);
           }
           break;
@@ -720,7 +720,7 @@ void read_gesture_event(void)
           Log_info("SLIDER: Swipe ->");
           if (!touchbar_tap_mode) {
             // DIAGNOSTIC (noisy, submitted): touch zone equivalent for slide mode.
-            Log_error_submit("DIAG nav: touch zone detected: SWIPE_POSITIVE (slide mode)");
+            Log_error("DIAG nav: touch zone detected: SWIPE_POSITIVE (slide mode)");
             show_cached_image_by_offset(+1);
           }
           break;
